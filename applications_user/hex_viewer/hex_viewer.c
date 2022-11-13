@@ -215,8 +215,10 @@ int32_t hex_viewer_app(void* p) {
                 furi_mutex_release(hex_viewer->mutex);
             } else if(input.key == InputKeyDown) {
                 furi_check(furi_mutex_acquire(hex_viewer->mutex, FuriWaitForever) == FuriStatusOk);
-                uint32_t max_bytes = HEX_VIEWER_BUF_SIZE;
-                if(hex_viewer->model->read_bytes == max_bytes) {
+                uint32_t cur_pos = hex_viewer->model->line * HEX_VIEWER_BYTES_PER_ROW +
+                                   hex_viewer->model->read_bytes;
+
+                if(hex_viewer->model->file_size > cur_pos) {
                     hex_viewer->model->line++;
                     if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) break;
                 }
