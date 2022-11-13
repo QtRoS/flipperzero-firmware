@@ -3,6 +3,7 @@
 
 #include <hex_viewer_icons.h>
 #include <gui/gui.h>
+#include <gui/elements.h>
 #include <dialogs/dialogs.h>
 #include <storage/storage.h>
 
@@ -22,6 +23,7 @@ typedef struct {
     uint8_t file_bytes[HEX_VIEWER_ROW_COUNT][HEX_VIEWER_ROW_COUNT];
     uint32_t line;
     uint32_t read_bytes;
+    uint32_t file_size;
     bool mode; // Print address or content
 } HexViewerModel;
 
@@ -41,12 +43,22 @@ static void render_callback(Canvas* canvas, void* ctx) {
 
     canvas_clear(canvas);
     canvas_set_color(canvas, ColorBlack);
-    canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str(canvas, 0, 12, "HexViewer");
+    // canvas_set_font(canvas, FontPrimary);
+    // canvas_draw_str(canvas, 0, 12, "HexViewer");
+
+    elements_button_left(canvas, hex_viewer->model->mode ? "Addr" : "Text");
+    elements_button_right(canvas, "Info");
+
+    uint32_t line_count = hex_viewer->model->file_size / HEX_VIEWER_BYTES_PER_ROW;
+    if(hex_viewer->model->file_size % HEX_VIEWER_BYTES_PER_ROW != 0) line_count += 1;
+    if(line_count > HEX_VIEWER_ROW_COUNT)
+        elements_scrollbar(
+            canvas, hex_viewer->model->line, line_count - (HEX_VIEWER_ROW_COUNT - 1));
 
     char temp_buf[32];
     int ROW_HEIGHT = 12;
-    int TOP_OFFSET = 24;
+    int TOP_OFFSET = 10; // 24
+    int LEFT_OFFSET = 3;
 
     uint32_t row_iters = hex_viewer->model->read_bytes / HEX_VIEWER_BYTES_PER_ROW;
     if(hex_viewer->model->read_bytes % HEX_VIEWER_BYTES_PER_ROW != 0) row_iters += 1;
@@ -63,13 +75,13 @@ static void render_callback(Canvas* canvas, void* ctx) {
                 if(!isprint((int)temp_buf[j])) temp_buf[j] = '.';
 
             canvas_set_font(canvas, FontKeyboard);
-            canvas_draw_str(canvas, 0, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
+            canvas_draw_str(canvas, LEFT_OFFSET, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
         } else {
             int addr = (i + hex_viewer->model->line) * HEX_VIEWER_BYTES_PER_ROW;
             snprintf(temp_buf, 32, "%04d", addr);
 
             canvas_set_font(canvas, FontKeyboard);
-            canvas_draw_str(canvas, 0, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
+            canvas_draw_str(canvas, LEFT_OFFSET, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
         }
 
         char* p = temp_buf;
@@ -77,7 +89,7 @@ static void render_callback(Canvas* canvas, void* ctx) {
             p += snprintf(p, 32, "%02X ", hex_viewer->model->file_bytes[i][j]);
 
         canvas_set_font(canvas, FontKeyboard);
-        canvas_draw_str(canvas, 40, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
+        canvas_draw_str(canvas, LEFT_OFFSET + 40, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
     }
 
     furi_mutex_release(hex_viewer->model_mutex);
@@ -138,6 +150,8 @@ bool hex_viewer_read_file(HexViewer* hex_viewer, const char* file_path) {
             FURI_LOG_E(TAG, "Unable to open file");
             break;
         };
+
+        hex_viewer->model->file_size = storage_file_size(file);
 
         uint32_t offset = hex_viewer->model->line * HEX_VIEWER_BYTES_PER_ROW;
         if(!storage_file_seek(file, offset, true)) {
@@ -212,8 +226,19 @@ int32_t hex_viewer_app(void* p) {
                     FURI_LOG_E(TAG, "Unable to load file: %s", furi_string_get_cstr(file_path));
                     break;
                 }
-            } else if(input.key == InputKeyLeft || input.key == InputKeyRight) {
+            } else if(input.key == InputKeyLeft) {
                 hex_viewer->model->mode = !hex_viewer->model->mode;
+            } else if(input.key == InputKeyRight) {
+                DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
+                DialogMessage* message = dialog_message_alloc();
+                dialog_message_set_header(message, "Hex Viewer", 16, 2, AlignLeft, AlignTop);
+                dialog_message_set_icon(message, &I_hex_10px, 3, 2);
+                dialog_message_set_text(
+                    message, "Some important information", 3, 30, AlignLeft, AlignTop);
+                dialog_message_set_buttons(message, "Back", NULL, NULL);
+                dialog_message_show(dialogs, message);
+                dialog_message_free(message);
+                furi_record_close(RECORD_DIALOGS);
             }
 
             furi_mutex_release(hex_viewer->model_mutex);
