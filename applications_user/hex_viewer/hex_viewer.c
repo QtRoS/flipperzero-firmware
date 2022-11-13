@@ -18,6 +18,7 @@
 
 #define HEX_VIEWER_BYTES_PER_ROW 4
 #define HEX_VIEWER_ROW_COUNT 4
+#define HEX_VIEWER_BUF_SIZE (HEX_VIEWER_BYTES_PER_ROW * HEX_VIEWER_ROW_COUNT)
 
 typedef struct {
     uint8_t file_bytes[HEX_VIEWER_ROW_COUNT][HEX_VIEWER_ROW_COUNT];
@@ -29,7 +30,7 @@ typedef struct {
 
 typedef struct {
     HexViewerModel* model;
-    FuriMutex** model_mutex;
+    FuriMutex** mutex;
 
     FuriMessageQueue* input_queue;
 
@@ -39,12 +40,10 @@ typedef struct {
 
 static void render_callback(Canvas* canvas, void* ctx) {
     HexViewer* hex_viewer = ctx;
-    furi_check(furi_mutex_acquire(hex_viewer->model_mutex, FuriWaitForever) == FuriStatusOk);
+    furi_check(furi_mutex_acquire(hex_viewer->mutex, FuriWaitForever) == FuriStatusOk);
 
     canvas_clear(canvas);
     canvas_set_color(canvas, ColorBlack);
-    // canvas_set_font(canvas, FontPrimary);
-    // canvas_draw_str(canvas, 0, 12, "HexViewer");
 
     elements_button_left(canvas, hex_viewer->model->mode ? "Addr" : "Text");
     elements_button_right(canvas, "Info");
@@ -92,7 +91,7 @@ static void render_callback(Canvas* canvas, void* ctx) {
         canvas_draw_str(canvas, LEFT_OFFSET + 40, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
     }
 
-    furi_mutex_release(hex_viewer->model_mutex);
+    furi_mutex_release(hex_viewer->mutex);
 }
 
 static void input_callback(InputEvent* input_event, void* ctx) {
@@ -108,7 +107,7 @@ HexViewer* hex_viewer_alloc() {
     instance->model = malloc(sizeof(HexViewerModel));
     // memset(instance->model->file_bytes, 0x0, HEX_VIEWER_BYTES_PER_ROW * HEX_VIEWER_ROW_COUNT);
 
-    instance->model_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    instance->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
 
     instance->input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
 
@@ -129,7 +128,7 @@ void hex_viewer_free(HexViewer* instance) {
 
     furi_message_queue_free(instance->input_queue);
 
-    furi_mutex_free(instance->model_mutex);
+    furi_mutex_free(instance->mutex);
 
     free(instance->model);
     free(instance);
@@ -139,15 +138,17 @@ bool hex_viewer_read_file(HexViewer* hex_viewer, const char* file_path) {
     furi_assert(hex_viewer);
     furi_assert(file_path);
 
-    // furi_check(furi_mutex_acquire(hex_viewer->model_mutex, FuriWaitForever) == FuriStatusOk);
-    memset(hex_viewer->model->file_bytes, 0x0, HEX_VIEWER_ROW_COUNT * HEX_VIEWER_BYTES_PER_ROW);
+    memset(hex_viewer->model->file_bytes, 0x0, HEX_VIEWER_BUF_SIZE);
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
     File* file = storage_file_alloc(storage);
 
+    bool isOk = true;
+
     do {
         if(!storage_file_open(file, file_path, FSAM_READ, FSOM_OPEN_EXISTING)) {
-            FURI_LOG_E(TAG, "Unable to open file");
+            FURI_LOG_E(TAG, "Unable to open file: %s", file_path);
+            isOk = false;
             break;
         };
 
@@ -155,19 +156,19 @@ bool hex_viewer_read_file(HexViewer* hex_viewer, const char* file_path) {
 
         uint32_t offset = hex_viewer->model->line * HEX_VIEWER_BYTES_PER_ROW;
         if(!storage_file_seek(file, offset, true)) {
-            FURI_LOG_E(TAG, "Unable to seek file");
+            FURI_LOG_E(TAG, "Unable to seek file: %s", file_path);
+            isOk = false;
             break;
         }
 
-        hex_viewer->model->read_bytes = storage_file_read(
-            file, hex_viewer->model->file_bytes, HEX_VIEWER_ROW_COUNT * HEX_VIEWER_BYTES_PER_ROW);
+        hex_viewer->model->read_bytes =
+            storage_file_read(file, hex_viewer->model->file_bytes, HEX_VIEWER_BUF_SIZE);
     } while(false);
 
     storage_file_free(file);
     furi_record_close(RECORD_STORAGE);
-    // furi_mutex_release(hex_viewer->model_mutex);
 
-    return true;
+    return isOk;
 }
 
 int32_t hex_viewer_app(void* p) {
@@ -197,37 +198,33 @@ int32_t hex_viewer_app(void* p) {
             }
         }
 
-        if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) {
-            FURI_LOG_E(TAG, "Unable to load file: %s", furi_string_get_cstr(file_path));
-            break;
-        }
+        if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) break;
 
         InputEvent input;
         while(furi_message_queue_get(hex_viewer->input_queue, &input, FuriWaitForever) ==
               FuriStatusOk) {
-            furi_check(
-                furi_mutex_acquire(hex_viewer->model_mutex, FuriWaitForever) == FuriStatusOk);
-
             if(input.key == InputKeyBack) {
-                furi_mutex_release(hex_viewer->model_mutex);
                 break;
             } else if(input.key == InputKeyUp) {
-                if(hex_viewer->model->line > 0) hex_viewer->model->line--;
+                furi_check(furi_mutex_acquire(hex_viewer->mutex, FuriWaitForever) == FuriStatusOk);
+                if(hex_viewer->model->line > 0) {
+                    hex_viewer->model->line--;
 
-                if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) {
-                    FURI_LOG_E(TAG, "Unable to load file: %s", furi_string_get_cstr(file_path));
-                    break;
+                    if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) break;
                 }
+                furi_mutex_release(hex_viewer->mutex);
             } else if(input.key == InputKeyDown) {
-                uint32_t max_bytes = HEX_VIEWER_ROW_COUNT * HEX_VIEWER_BYTES_PER_ROW;
-                if(hex_viewer->model->read_bytes == max_bytes) hex_viewer->model->line++;
-
-                if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) {
-                    FURI_LOG_E(TAG, "Unable to load file: %s", furi_string_get_cstr(file_path));
-                    break;
+                furi_check(furi_mutex_acquire(hex_viewer->mutex, FuriWaitForever) == FuriStatusOk);
+                uint32_t max_bytes = HEX_VIEWER_BUF_SIZE;
+                if(hex_viewer->model->read_bytes == max_bytes) {
+                    hex_viewer->model->line++;
+                    if(!hex_viewer_read_file(hex_viewer, furi_string_get_cstr(file_path))) break;
                 }
+                furi_mutex_release(hex_viewer->mutex);
             } else if(input.key == InputKeyLeft) {
+                furi_check(furi_mutex_acquire(hex_viewer->mutex, FuriWaitForever) == FuriStatusOk);
                 hex_viewer->model->mode = !hex_viewer->model->mode;
+                furi_mutex_release(hex_viewer->mutex);
             } else if(input.key == InputKeyRight) {
                 DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
                 DialogMessage* message = dialog_message_alloc();
@@ -241,7 +238,6 @@ int32_t hex_viewer_app(void* p) {
                 furi_record_close(RECORD_DIALOGS);
             }
 
-            furi_mutex_release(hex_viewer->model_mutex);
             view_port_update(hex_viewer->view_port);
         }
     } while(false);
