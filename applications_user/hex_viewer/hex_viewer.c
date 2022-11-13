@@ -226,14 +226,24 @@ int32_t hex_viewer_app(void* p) {
                 hex_viewer->model->mode = !hex_viewer->model->mode;
                 furi_mutex_release(hex_viewer->mutex);
             } else if(input.key == InputKeyRight) {
+                FuriString* buffer;
+                buffer = furi_string_alloc();
+                furi_string_printf(
+                    buffer,
+                    "File path: %s\nFile size: %lu bytes",
+                    furi_string_get_cstr(file_path),
+                    hex_viewer->model->file_size);
+
                 DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
                 DialogMessage* message = dialog_message_alloc();
                 dialog_message_set_header(message, "Hex Viewer", 16, 2, AlignLeft, AlignTop);
                 dialog_message_set_icon(message, &I_hex_10px, 3, 2);
                 dialog_message_set_text(
-                    message, "Some important information", 3, 30, AlignLeft, AlignTop);
-                dialog_message_set_buttons(message, "Back", NULL, NULL);
+                    message, furi_string_get_cstr(buffer), 3, 16, AlignLeft, AlignTop);
+                dialog_message_set_buttons(message, NULL, NULL, "Back");
                 dialog_message_show(dialogs, message);
+
+                furi_string_free(buffer);
                 dialog_message_free(message);
                 furi_record_close(RECORD_DIALOGS);
             }
