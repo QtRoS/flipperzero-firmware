@@ -48,17 +48,24 @@ static void render_callback(Canvas* canvas, void* ctx) {
     elements_button_left(canvas, hex_viewer->model->mode ? "Addr" : "Text");
     elements_button_right(canvas, "Info");
 
-    uint32_t line_count = hex_viewer->model->file_size / HEX_VIEWER_BYTES_PER_ROW;
-    if(hex_viewer->model->file_size % HEX_VIEWER_BYTES_PER_ROW != 0) line_count += 1;
-    if(line_count > HEX_VIEWER_ROW_COUNT)
-        elements_scrollbar(
-            canvas, hex_viewer->model->line, line_count - (HEX_VIEWER_ROW_COUNT - 1));
-
-    char temp_buf[32];
     int ROW_HEIGHT = 12;
     int TOP_OFFSET = 10; // 24
     int LEFT_OFFSET = 3;
 
+    uint32_t line_count = hex_viewer->model->file_size / HEX_VIEWER_BYTES_PER_ROW;
+    if(hex_viewer->model->file_size % HEX_VIEWER_BYTES_PER_ROW != 0) line_count += 1;
+    if(line_count > HEX_VIEWER_ROW_COUNT) {
+        uint8_t width = canvas_width(canvas);
+        elements_scrollbar_pos(
+            canvas,
+            width,
+            0,
+            ROW_HEIGHT * HEX_VIEWER_ROW_COUNT,
+            hex_viewer->model->line,
+            line_count - (HEX_VIEWER_ROW_COUNT - 1));
+    }
+
+    char temp_buf[32];
     uint32_t row_iters = hex_viewer->model->read_bytes / HEX_VIEWER_BYTES_PER_ROW;
     if(hex_viewer->model->read_bytes % HEX_VIEWER_BYTES_PER_ROW != 0) row_iters += 1;
 
@@ -88,7 +95,7 @@ static void render_callback(Canvas* canvas, void* ctx) {
             p += snprintf(p, 32, "%02X ", hex_viewer->model->file_bytes[i][j]);
 
         canvas_set_font(canvas, FontKeyboard);
-        canvas_draw_str(canvas, LEFT_OFFSET + 40, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
+        canvas_draw_str(canvas, LEFT_OFFSET + 41, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
     }
 
     furi_mutex_release(hex_viewer->mutex);
