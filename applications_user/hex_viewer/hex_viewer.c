@@ -89,7 +89,7 @@ static void render_callback(Canvas* canvas, void* ctx) {
             canvas_draw_str(canvas, LEFT_OFFSET, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
         } else {
             int addr = (i + hex_viewer->model->line) * HEX_VIEWER_BYTES_PER_ROW;
-            snprintf(temp_buf, 32, "%04d", addr);
+            snprintf(temp_buf, 32, "%04X", addr);
 
             canvas_set_font(canvas, FontKeyboard);
             canvas_draw_str(canvas, LEFT_OFFSET, TOP_OFFSET + i * ROW_HEIGHT, temp_buf);
